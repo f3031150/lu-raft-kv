@@ -10,6 +10,9 @@ import lombok.Setter;
 /**
  * 日志条目
  *
+ * 备注：日志条目的 状态机指令
+ *
+ *
  * @author 莫那·鲁道
  * @see LogModule
  */
@@ -17,11 +20,11 @@ import lombok.Setter;
 @Setter
 public class LogEntry implements Serializable, Comparable {
 
-    private Long index;
+    private Long index; // 日志序列号 index
 
-    private long term;
+    private long term; // leader接受到状态机指令时的 任期号
 
-    private Command command;
+    private Command command; // 具体的命令
 
     public LogEntry() {
     }

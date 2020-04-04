@@ -61,22 +61,25 @@ public class DefaultConsensus implements Consensus {
             }
 
             // (当前节点并没有投票 或者 已经投票过了且是对方节点) && 对方日志和自己一样新
-            LOGGER.info("node {} current vote for [{}], param candidateId : {}", node.peerSet.getSelf(), node.getVotedFor(), param.getCandidateId());
-            LOGGER.info("node {} current term {}, peer term : {}", node.peerSet.getSelf(), node.getCurrentTerm(), param.getTerm());
+            LOGGER.info("node {} current vote for [{}], param candidateId : {}",
+                    node.peerSet.getSelf(), node.getVotedFor(), param.getCandidateId());
+            LOGGER.info("node {} current term {}, peer term : {}", // peer 同龄人
+                    node.peerSet.getSelf(), node.getCurrentTerm(), param.getTerm());
 
             if ((StringUtil.isNullOrEmpty(node.getVotedFor()) || node.getVotedFor().equals(param.getCandidateId()))) {
 
                 if (node.getLogModule().getLast() != null) {
                     // 先比较term，term大的优先级大
                     if (node.getLogModule().getLast().getTerm() > param.getLastLogTerm()) {
-                        return RvoteResult.fail();
+                        return RvoteResult.fail(); // fixme 备注 ：思考？ 为啥要返回空的 term 回去
                     }
                     // term >= 自己，再比较lastLogIndex
                     if (node.getLogModule().getLastIndex() > param.getLastLogIndex()) {
-                        return RvoteResult.fail();
+                        return RvoteResult.fail(); // fixme 备注 ：思考？ 为啥要返回空的 term 回去
                     }
                 }
 
+                // 我确定投你这一票，我才会切换自己的状态，并且更新投票箱，任期号
                 // 切换状态
                 node.status = NodeStatus.FOLLOWER;
                 // 更新
@@ -87,6 +90,7 @@ public class DefaultConsensus implements Consensus {
                 return builder.term(node.currentTerm).voteGranted(true).build();
             }
 
+            // 本节点已经投过票了，并且还不是你，那不好意思，我拒绝你了
             return builder.term(node.currentTerm).voteGranted(false).build();
 
         } finally {
@@ -124,7 +128,7 @@ public class DefaultConsensus implements Consensus {
             node.peerSet.setLeader(new Peer(param.getLeaderId()));
 
             // 够格
-            if (param.getTerm() >= node.getCurrentTerm()) {
+            if (param.getTerm() >= node.getCurrentTerm()) { // FIXME 多余？
                 LOGGER.debug("node {} become FOLLOWER, currentTerm : {}, param Term : {}, param serverId",
                     node.peerSet.getSelf(), node.currentTerm, param.getTerm(), param.getServerId());
                 // 认怂
@@ -143,8 +147,8 @@ public class DefaultConsensus implements Consensus {
             // 真实日志
             // 第一次
             if (node.getLogModule().getLastIndex() != 0 && param.getPrevLogIndex() != 0) {
-                LogEntry logEntry;
-                if ((logEntry = node.getLogModule().read(param.getPrevLogIndex())) != null) {
+                LogEntry logEntry = node.getLogModule().read(param.getPrevLogIndex());
+                if (logEntry != null) {
                     // 如果日志在 prevLogIndex 位置处的日志条目的任期号和 prevLogTerm 不匹配，则返回 false
                     // 需要减小 nextIndex 重试.
                     if (logEntry.getTerm() != param.getPreLogTerm()) {

@@ -99,7 +99,7 @@ public class DefaultNode<T> implements Node<T>, LifeCycle, ClusterMembershipChan
     volatile long currentTerm = 0;
     /** 在当前获得选票的候选人的 Id */
     volatile String votedFor;
-    /** 日志条目集；每一个条目包含一个用户状态机执行的指令，和收到时的任期号 */
+    /** 日志条目集；每一个条目包含一个用户状态机执行的指令，和leader收到该指令时的任期号 */
     LogModule logModule;
 
 
@@ -112,9 +112,14 @@ public class DefaultNode<T> implements Node<T>, LifeCycle, ClusterMembershipChan
     /** 最后被应用到状态机的日志条目索引值（初始化为 0，持续递增) */
     volatile long lastApplied = 0;
 
-    /* ========== 在领导人里经常改变的(选举后重新初始化) ================== */
+
+
+    /* ========== 在领导人里经常改变的(选举后重新初始化) 领导人不删除自己的日志，只追加日志 ================== */
 
     /** 对于每一个服务器，需要发送给他的下一个日志条目的索引值（初始化为领导人最后索引值加一） */
+    // 当本服务器自己当选leader的时候，将该分发列表初始化为自己最后一条日志index + 1
+    // 如果follower 自己的最新的日志条目和leader的不一样，那么 日志追加rpc 就会失败，然后leade就减少这个值 （index - 1），并重试，最后达成一致
+    // 达成一致后，follower 的多余的日志会被删除，然后追加leader的日志
     Map<Peer, Long> nextIndexs;
 
     /** 对于每一个服务器，已经复制给他的日志的最高索引值 */

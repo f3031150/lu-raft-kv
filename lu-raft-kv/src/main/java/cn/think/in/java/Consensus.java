@@ -24,7 +24,7 @@ public interface Consensus {
     RvoteResult requestVote(RvoteParam param);
 
     /**
-     * 附加日志(多个日志,为了提高效率) RPC
+     * 附加日志(多个日志,为了提高效率【备注：第三种RPC】) RPC
      *
      * 接收者实现：
      *

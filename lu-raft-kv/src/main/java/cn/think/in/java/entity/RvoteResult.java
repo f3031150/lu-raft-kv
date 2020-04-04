@@ -8,6 +8,9 @@ import lombok.Setter;
 /**
  *
  * 请求投票 RPC 返回值.
+ * 接收器实现:
+ * 1.当 term < currentTerm 时回复 false (5.1)
+ * 2.如果votedFor为空或candidateId，并且候选人的日志至少与接收者的日志一样最新，则授予投票权 （5.2 , 5.4)
  *
  */
 @Getter
@@ -18,7 +21,7 @@ public class RvoteResult implements Serializable {
     long term;
 
     /** 候选人赢得了此张选票时为真 */
-    boolean voteGranted;
+    boolean voteGranted; // 投票确认（granted 确认）
 
     public RvoteResult(boolean voteGranted) {
         this.voteGranted = voteGranted;

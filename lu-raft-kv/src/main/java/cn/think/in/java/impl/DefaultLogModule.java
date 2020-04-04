@@ -21,7 +21,7 @@ import static java.util.concurrent.TimeUnit.MILLISECONDS;
 /**
  *
  * 默认的日志实现. 日志模块不关心 key, 只关心 index.
- *
+ * 备注：日志条目集；每一个条目包含一个用户状态机执行的指令（LogEntry【就是写请求】），和leader收到该指令时的任期号（在logEntry里面）
  * @author 莫那·鲁道
  * @see cn.think.in.java.entity.LogEntry
  */
@@ -38,7 +38,7 @@ public class DefaultLogModule implements LogModule {
 
     private static RocksDB logDb;
 
-    public final static byte[] LAST_INDEX_KEY = "LAST_INDEX_KEY".getBytes();
+    public final static byte[] LAST_INDEX_KEY = "LAST_INDEX_KEY".getBytes(); // 保存最后一条日志的 index
 
     ReentrantLock lock = new ReentrantLock();
 

@@ -7,6 +7,11 @@ import lombok.Setter;
 /**
  * 请求投票 RPC 参数.
  *
+ *
+ * 接收器实现:
+ * 1.当 term < currentTerm 时回复 false (5.1)
+ * 2.如果votedFor为空或candidateId，并且候选人的日志至少与接收者的日志一样最新，则授予投票权 （5.2 , 5.4)
+ *
  * @author 莫那·鲁道
  * @see Consensus#requestVote(RvoteParam)
  */
