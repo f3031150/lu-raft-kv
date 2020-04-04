@@ -57,6 +57,55 @@ import static java.util.concurrent.TimeUnit.MILLISECONDS;
 
 /**
  * 抽象机器节点, 初始为 follower, 角色随时变化.
+ *
+ * 所有的服务器：
+ * 如果 commitIndex（当前已经提交的index） > lastApplied(被应用到状态机的日志索引值) :
+ *   递增 lastApplied 应用 [lastApplied] 到状态机 （5.3）
+ *
+ * 如果rpc 请求或者返回包含 term T > currentTerm ：
+ *    设置 currentTime = T ,本节点 转化状态为 follower （5.1）
+ *
+ * 跟随者 （5.2）
+ * 回应 candidate 和 leader
+ * 如果选举超时而未收到当前领导人的 追加RPC 或 未向候选人授予选票：
+ * 转化状态为candidate
+ *
+ *
+ * 候选者（5.2）：
+ * 转为候选人，开始选举：
+ * 递增currentTerm。
+ * 投票给自己
+ * 重置选举超时时钟
+ * 发送投票RPC给所有的服务器
+ * 如果从大多数机器获得投票，则直接成为leader
+ * 如果收到新的领导者的rpc则 成为follower
+ * 如果选举超时，那么重新开始选举（即重新增加走这一套）
+ *
+ * 领导：
+ * 在选举之上：向所有的服务器发送 空的追加日志（心跳包） ； 在空闲期重复此动作，用来防止选举超时（5.2）
+ * 如果从客户端接收到命令：在条目应用到状态机后响应后 , 将条目附加到本地日志 （5.2）
+ * 如果领导自己的 index>= nextIndex（针对某个 follower最新的log）, 发送追加日志rpc  LogEntry[] entries  给追随者
+ * 如果追加成功：那么更新 这个跟随着对应的 nextIndex 和 matchIndex（5.3）
+ * 如果追加失败（一致性检查失败）：那么就递减 nextIndex 并发起重试（5.3）
+ * 如果存在一个 N 使得 N > commitIndex，并且大多数  的matchIndex[i] >= N , 和 log[N].term == currentTerm :
+ *    那么设置 commitIndex = N ; (5.3 , 5.4)
+ *
+ *
+ * 选举的安全性：
+ * 在一个特定的任期内最多只能选出一位领导人。
+ *
+ * leader 只追加特性 ：
+ *  leader 永远只会追加日志，不会覆盖和删除日志条目。
+ *
+ * 日志匹配性：
+ *  如果两个日志条目：只要他们的index 和term相同，那么这个条目将出现在所有编号更高的term的领导人日志中
+ *
+ * leader 完整性：
+ *  如果一个日志条目 在某个term 里面被提交了， 那么 这个日志一定出现在term编号更高的 leader 中
+ *
+ * 状态机安全性：
+ *  如果一个日志 在某个 index 的地方被应用到状态机了，那么不会被其他的服务在这个index的地方在应用一个不同的日志
+ *
  * @author 莫那·鲁道
  */
 @Getter
@@ -73,7 +122,7 @@ public class DefaultNode<T> implements Node<T>, LifeCycle, ClusterMembershipChan
     /** 上次一心跳时间戳 */
     public volatile long preHeartBeatTime = 0;
     /** 心跳间隔基数 */
-    public final long heartBeatTick = 5 * 1000;
+    public final long heartBeatTick = 5 * 1000; // 5s
 
 
     private HeartBeatTask heartBeatTask = new HeartBeatTask();
@@ -257,7 +306,7 @@ public class DefaultNode<T> implements Node<T>, LifeCycle, ClusterMembershipChan
             return redirect(request);
         }
 
-        if (request.getType() == ClientKVReq.GET) {
+        if (request.getType() == ClientKVReq.GET) { // 经过上面的判断，她一定能读到写进去的（也不一定，因为脑裂可能有多个leader），因为他是leader
             LogEntry logEntry = stateMachine.get(request.getKey());
             if (logEntry != null) {
                 return new ClientKVAck(logEntry.getCommand());
@@ -699,7 +748,7 @@ public class DefaultNode<T> implements Node<T>, LifeCycle, ClusterMembershipChan
         @Override
         public void run() {
 
-            if (status != LEADER) {
+            if (status != LEADER) { // 当前节点不是领导，就不需要主动发送心跳包，只有领导才会主动发起心跳包
                 return;
             }
 
@@ -744,7 +793,7 @@ public class DefaultNode<T> implements Node<T>, LifeCycle, ClusterMembershipChan
                     } catch (Exception e) {
                         LOGGER.error("HeartBeatTask RPC Fail, request URL : {} ", request.getUrl());
                     }
-                }, false);
+                }, false); // 心跳包不需要同步调用，异步即可
             }
         }
     }

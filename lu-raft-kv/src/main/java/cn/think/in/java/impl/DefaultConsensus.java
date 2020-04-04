@@ -132,12 +132,12 @@ public class DefaultConsensus implements Consensus {
                 LOGGER.debug("node {} become FOLLOWER, currentTerm : {}, param Term : {}, param serverId",
                     node.peerSet.getSelf(), node.currentTerm, param.getTerm(), param.getServerId());
                 // 认怂
-                node.status = NodeStatus.FOLLOWER;
+                node.status = NodeStatus.FOLLOWER; // 心跳包 阻止 follower变成候选人，阻止 candidate 发起投票
             }
             // 使用对方的 term.
             node.setCurrentTerm(param.getTerm());
 
-            //心跳
+            // 心跳
             if (param.getEntries() == null || param.getEntries().length == 0) {
                 LOGGER.info("node {} append heartbeat success , he's term : {}, my term : {}",
                     param.getLeaderId(), param.getTerm(), node.getCurrentTerm());
@@ -146,7 +146,7 @@ public class DefaultConsensus implements Consensus {
 
             // 真实日志
             // 第一次
-            if (node.getLogModule().getLastIndex() != 0 && param.getPrevLogIndex() != 0) {
+            if (node.getLogModule().getLastIndex() != 0 && param.getPrevLogIndex() != 0) { // fixme 为啥要这个判断
                 LogEntry logEntry = node.getLogModule().read(param.getPrevLogIndex());
                 if (logEntry != null) {
                     // 如果日志在 prevLogIndex 位置处的日志条目的任期号和 prevLogTerm 不匹配，则返回 false
@@ -158,7 +158,6 @@ public class DefaultConsensus implements Consensus {
                     // index 不对, 需要递减 nextIndex 重试.
                     return result;
                 }
-
             }
 
             // 如果已经存在的日志条目和新的产生冲突（索引值相同但是任期号不同），删除这一条和之后所有的
@@ -174,7 +173,7 @@ public class DefaultConsensus implements Consensus {
 
             // 写进日志并且应用到状态机
             for (LogEntry entry : param.getEntries()) {
-                node.getLogModule().write(entry);
+                node.getLogModule().write(entry); // FIXME 执行这行代码后， 本节点立马挂掉，就导致，数据写到 文件里面，但是状态机没来得及写，数据不一致
                 node.stateMachine.apply(entry);
                 result.setSuccess(true);
             }
