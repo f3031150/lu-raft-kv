@@ -68,14 +68,14 @@ public class DefaultConsensus implements Consensus {
 
             if ((StringUtil.isNullOrEmpty(node.getVotedFor()) || node.getVotedFor().equals(param.getCandidateId()))) {
 
-                if (node.getLogModule().getLast() != null) {
+                if (node.getLogModule().getLast() != null) { // -1 的时候没有条目对应
                     // 先比较term，term大的优先级大
                     if (node.getLogModule().getLast().getTerm() > param.getLastLogTerm()) {
-                        return RvoteResult.fail(); // fixme 备注 ：思考？ 为啥要返回空的 term 回去
+                        return RvoteResult.fail();// fixme 这里需要返回term ？
                     }
                     // term >= 自己，再比较lastLogIndex
                     if (node.getLogModule().getLastIndex() > param.getLastLogIndex()) {
-                        return RvoteResult.fail(); // fixme 备注 ：思考？ 为啥要返回空的 term 回去
+                        return RvoteResult.fail(); // fixme 这里需要返回term
                     }
                 }
 
@@ -146,7 +146,7 @@ public class DefaultConsensus implements Consensus {
 
             // 真实日志
             // 第一次
-            if (node.getLogModule().getLastIndex() != 0 && param.getPrevLogIndex() != 0) { // fixme 为啥要这个判断
+            if (node.getLogModule().getLastIndex() != 0 && param.getPrevLogIndex() != 0) { // 第一条日志的时候prevLogIndex是0 fixme node.getLogModule().getLastIndex() != 0 多余
                 LogEntry logEntry = node.getLogModule().read(param.getPrevLogIndex());
                 if (logEntry != null) {
                     // 如果日志在 prevLogIndex 位置处的日志条目的任期号和 prevLogTerm 不匹配，则返回 false

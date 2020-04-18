@@ -23,10 +23,10 @@ public class RvoteParam extends BaseParam {
     String candidateId;
 
     /** 候选人的最后日志条目的索引值 */
-    long lastLogIndex;
+    long lastLogIndex; // 每个新的集群节点第一次启动都是 -1 开始
 
     /** 候选人最后日志条目的任期号  */
-    long lastLogTerm;
+    long lastLogTerm; // 从 0开始
 
     private RvoteParam(Builder builder) {
         setTerm(builder.term);
@@ -57,8 +57,8 @@ public class RvoteParam extends BaseParam {
         private long term;
         private String serverId;
         private String candidateId;
-        private long lastLogIndex;
-        private long lastLogTerm;
+        private long lastLogIndex; // -1 开始
+        private long lastLogTerm; // 从 0开始
 
         private Builder() {
         }

@@ -77,17 +77,17 @@ import static java.util.concurrent.TimeUnit.MILLISECONDS;
  * 投票给自己
  * 重置选举超时时钟
  * 发送投票RPC给所有的服务器
- * 如果从大多数机器获得投票，则直接成为leader
+ * 如果从大多数机器获得投票，则直接成为leader（重置维护跟随者的追加数组）
  * 如果收到新的领导者的rpc则 成为follower
  * 如果选举超时，那么重新开始选举（即重新增加走这一套）
  *
  * 领导：
  * 在选举之上：向所有的服务器发送 空的追加日志（心跳包） ； 在空闲期重复此动作，用来防止选举超时（5.2）
  * 如果从客户端接收到命令：在条目应用到状态机后响应后 , 将条目附加到本地日志 （5.2）
- * 如果领导自己的 index>= nextIndex（针对某个 follower最新的log）, 发送追加日志rpc  LogEntry[] entries  给追随者
+ * 如果领导自己的 index >= nextIndex（针对某个 follower最新的log）, 发送追加日志rpc  LogEntry[] entries  给追随者
  * 如果追加成功：那么更新 这个跟随着对应的 nextIndex 和 matchIndex（5.3）
  * 如果追加失败（一致性检查失败）：那么就递减 nextIndex 并发起重试（5.3）
- * 如果存在一个 N 使得 N > commitIndex，并且大多数  的matchIndex[i] >= N , 和 log[N].term == currentTerm :
+ * 如果存在一个 index N 使得 N > commitIndex，并且大多数  的matchIndex[i] >= N , 和 log[N].term == currentTerm :
  *    那么设置 commitIndex = N ; (5.3 , 5.4)
  *
  *
@@ -115,7 +115,7 @@ public class DefaultNode<T> implements Node<T>, LifeCycle, ClusterMembershipChan
     private static final Logger LOGGER = LoggerFactory.getLogger(DefaultNode.class);
 
     /** 选举时间间隔基数 */
-    public volatile long electionTime = 15 * 1000;
+    public volatile long electionTime = 15 * 1000; // 当 electionTime + rand(50) 秒没收到心跳就超时，变成candidate 开始投票
     /** 上一次选举时间 */
     public volatile long preElectionTime = 0;
 
@@ -167,7 +167,7 @@ public class DefaultNode<T> implements Node<T>, LifeCycle, ClusterMembershipChan
 
     /** 对于每一个服务器，需要发送给他的下一个日志条目的索引值（初始化为领导人最后索引值加一） */
     // 当本服务器自己当选leader的时候，将该分发列表初始化为自己最后一条日志index + 1
-    // 如果follower 自己的最新的日志条目和leader的不一样，那么 日志追加rpc 就会失败，然后leade就减少这个值 （index - 1），并重试，最后达成一致
+    // 如果follower 自己的最新的日志条目和leader的不一样，那么 日志追加rpc 就会失败，然后leader就减少这个值 （index - 1），并重试，最后达成一致
     // 达成一致后，follower 的多余的日志会被删除，然后追加leader的日志
     Map<Peer, Long> nextIndexs;
 
@@ -317,6 +317,7 @@ public class DefaultNode<T> implements Node<T>, LifeCycle, ClusterMembershipChan
         LogEntry logEntry = LogEntry.newBuilder()
             .command(Command.newBuilder().
                 key(request.getKey()).
+
                 value(request.getValue()).
                 build())
             .term(currentTerm)
@@ -412,6 +413,16 @@ public class DefaultNode<T> implements Node<T>, LifeCycle, ClusterMembershipChan
     }
 
 
+    private LogEntry getPreLog(LogEntry logEntry) {
+        LogEntry entry = logModule.read(logEntry.getIndex() - 1);
+
+        if (entry == null) {
+            LOGGER.warn("get perLog is null , parameter logEntry : {}", logEntry);
+            entry = LogEntry.newBuilder().index(0L).term(0).command(null).build();
+        }
+        return entry;
+    }
+
     /** 复制到其他机器  */
     public Future<Boolean> replication(Peer peer, LogEntry entry) {
 
@@ -419,7 +430,8 @@ public class DefaultNode<T> implements Node<T>, LifeCycle, ClusterMembershipChan
             @Override
             public Boolean call() throws Exception {
 
-                long start = System.currentTimeMillis(), end = start;
+                long start = System.currentTimeMillis();
+                long end = start;
 
                 // 20 秒重试时间
                 while (end - start < 20 * 1000L) {
@@ -435,6 +447,7 @@ public class DefaultNode<T> implements Node<T>, LifeCycle, ClusterMembershipChan
                     Long nextIndex = nextIndexs.get(peer);
                     LinkedList<LogEntry> logEntries = new LinkedList<>();
                     if (entry.getIndex() >= nextIndex) {
+                        // 如果你新同步的日志index 比 本地维护的路由表大，那么证明 这一段日志肯定没同步到 其他节点，所以 把这一段的日志拿出来，同步到其他节点
                         for (long i = nextIndex; i <= entry.getIndex(); i++) {
                             LogEntry l = logModule.read(i);
                             if (l != null) {
@@ -447,15 +460,15 @@ public class DefaultNode<T> implements Node<T>, LifeCycle, ClusterMembershipChan
                     // 最小的那个日志.
                     LogEntry preLog = getPreLog(logEntries.getFirst());
                     aentryParam.setPreLogTerm(preLog.getTerm());
-                    aentryParam.setPrevLogIndex(preLog.getIndex());
+                    aentryParam.setPrevLogIndex(preLog.getIndex()); // 如果是新集群第一次同步 那么index是0
 
                     aentryParam.setEntries(logEntries.toArray(new LogEntry[0]));
 
                     Request request = Request.newBuilder()
-                        .cmd(Request.A_ENTRIES)
-                        .obj(aentryParam)
-                        .url(peer.getAddr())
-                        .build();
+                            .cmd(Request.A_ENTRIES)
+                            .obj(aentryParam)
+                            .url(peer.getAddr())
+                            .build();
 
                     try {
                         Response response = getRpcClient().send(request);
@@ -473,7 +486,7 @@ public class DefaultNode<T> implements Node<T>, LifeCycle, ClusterMembershipChan
                             // 对方比我大
                             if (result.getTerm() > currentTerm) {
                                 LOGGER.warn("follower [{}] term [{}] than more self, and my term = [{}], so, I will become follower",
-                                    peer, result.getTerm(), currentTerm);
+                                        peer, result.getTerm(), currentTerm);
                                 currentTerm = result.getTerm();
                                 // 认怂, 变成跟随者
                                 status = NodeStatus.FOLLOWER;
@@ -486,7 +499,7 @@ public class DefaultNode<T> implements Node<T>, LifeCycle, ClusterMembershipChan
                                 }
                                 nextIndexs.put(peer, nextIndex - 1);
                                 LOGGER.warn("follower {} nextIndex not match, will reduce nextIndex and retry RPC append, nextIndex : [{}]", peer.getAddr(),
-                                    nextIndex);
+                                        nextIndex);
                                 // 重来, 直到成功.
                             }
                         }
@@ -511,16 +524,6 @@ public class DefaultNode<T> implements Node<T>, LifeCycle, ClusterMembershipChan
             }
         });
 
-    }
-
-    private LogEntry getPreLog(LogEntry logEntry) {
-        LogEntry entry = logModule.read(logEntry.getIndex() - 1);
-
-        if (entry == null) {
-            LOGGER.warn("get perLog is null , parameter logEntry : {}", logEntry);
-            entry = LogEntry.newBuilder().index(0L).term(0).command(null).build();
-        }
-        return entry;
     }
 
 
@@ -607,16 +610,19 @@ public class DefaultNode<T> implements Node<T>, LifeCycle, ClusterMembershipChan
             // 基于 RAFT 的随机时间,解决冲突.
             electionTime = electionTime + ThreadLocalRandom.current().nextInt(50);
             if (current - preElectionTime < electionTime) {
+                // preElectionTime 在追加日志rpc（即 心跳 包里面刷新，所以 只要有主的心跳，这里都直接返回）
                 return;
             }
+            // 0.将自己设置为 候选人
             status = NodeStatus.CANDIDATE;
             LOGGER.error("node {} will become CANDIDATE and start election leader, current term : [{}], LastEntry : [{}]",
                 peerSet.getSelf(), currentTerm, logModule.getLast());
 
             preElectionTime = System.currentTimeMillis() + ThreadLocalRandom.current().nextInt(200) + 150;
 
+            // 1.增加任期号
             currentTerm = currentTerm + 1;
-            // 推荐自己.
+            // 2.投票给自己
             votedFor = peerSet.getSelf().getAddr();
 
             List<Peer> peers = peerSet.getPeersWithOutSelf();
@@ -640,7 +646,7 @@ public class DefaultNode<T> implements Node<T>, LifeCycle, ClusterMembershipChan
                         RvoteParam param = RvoteParam.newBuilder().
                             term(currentTerm).
                             candidateId(peerSet.getSelf().getAddr()).
-                            lastLogIndex(LongConvert.convert(logModule.getLastIndex())).
+                            lastLogIndex(LongConvert.convert(logModule.getLastIndex())). // 集群刚启动 第一次开始选举的时候 取值 -1
                             lastLogTerm(lastTerm).
                             build();
 
@@ -753,7 +759,7 @@ public class DefaultNode<T> implements Node<T>, LifeCycle, ClusterMembershipChan
             }
 
             long current = System.currentTimeMillis();
-            if (current - preHeartBeatTime < heartBeatTick) {
+            if (current - preHeartBeatTime < heartBeatTick) {  // 如果leader收到了追加rpc（这个追加的一定是比他term大的领导） 那么他就不会在发心跳了
                 return;
             }
             LOGGER.info("=========== NextIndex =============");

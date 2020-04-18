@@ -91,7 +91,7 @@ public class DefaultLogModule implements LogModule {
         boolean success = false;
         try {
             lock.tryLock(3000, MILLISECONDS);
-            logEntry.setIndex(getLastIndex() + 1);
+            logEntry.setIndex(getLastIndex() + 1); // 第一条 日志 是 0 开始 index 从 0 开始
             logDb.put(logEntry.getIndex().toString().getBytes(), JSON.toJSONBytes(logEntry));
             success = true;
             LOGGER.info("DefaultLogModule write rocksDB success, logEntry info : [{}]", logEntry);
@@ -159,7 +159,7 @@ public class DefaultLogModule implements LogModule {
 
     @Override
     public Long getLastIndex() {
-        byte[] lastIndex = "-1".getBytes();
+        byte[] lastIndex = "-1".getBytes(); // 注意 -1 在日志中是没有对应条目的
         try {
             lastIndex = logDb.get(LAST_INDEX_KEY);
             if (lastIndex == null) {
